@@ -1,4 +1,25 @@
-# HA Workouts
+# HA Workouts (fork)
+
+> **This is a fork of [mrvautin/ha-workouts](https://github.com/mrvautin/ha-workouts).**
+> It tracks upstream; upstream changes are reviewed before they are merged here.
+> Differences to the original (all Strava-side, other sources unchanged):
+>
+> - **Route polylines:** Strava's `map.summary_polyline` (already part of the activity
+>   list response — no extra API calls) is stored per activity in its own store
+>   (`.storage/ha_workouts_routes_<source>`, see `routes.py`), separate from the
+>   activity log so the period sensors stay cheap.
+> - **New sensor `sensor.<source>_latest_activity`:** the most recent activity from the
+>   persisted log (does not go `unknown` at midnight like the `last_activity_*`
+>   sensors). State = start time; attributes: name, type, distance, duration, pace,
+>   heart rate, elevation, calories, and `summary_polyline` (excluded from the recorder).
+> - **Local day boundaries for Strava:** "today" and backfill ranges are requested in
+>   Home Assistant's timezone instead of UTC, so activities started shortly after
+>   local midnight are no longer missed.
+> - **Correct Strava start times:** `start_date_local` is parsed as naive local time
+>   (like Garmin) instead of UTC, so calendar events are no longer shifted by the
+>   UTC offset.
+>
+> Install via HACS as a custom repository: `marvinhanno/ha-workouts` (category: Integration).
 
 A Home Assistant custom integration (HACS) that pulls workout and daily health
 data from Garmin, Coros, Strava, and/or Apple Health and exposes it as

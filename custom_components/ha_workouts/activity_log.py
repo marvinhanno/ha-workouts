@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 from .backfill_progress import BackfillProgress
 from .const import SPLITS_BACKFILL_PAUSE_SECONDS
 from .models import Activity, ActivitySplit, ActivityType
+from .routes import async_record_routes, async_wipe_routes
 
 if TYPE_CHECKING:
     from .sources.garmin import GarminSource
@@ -46,6 +47,8 @@ def _activity_to_dict(activity: Activity) -> dict:
     data = asdict(activity)
     data["activity_type"] = activity.activity_type.value
     data["start"] = activity.start.isoformat()
+    # Routes live in routes.py's separate store (see models.Activity).
+    data.pop("summary_polyline", None)
     # splits is already a list of plain dicts via asdict()'s recursion into
     # the nested ActivitySplit dataclasses — no further conversion needed.
     return data
@@ -99,6 +102,7 @@ async def async_wipe_activity_log(hass: HomeAssistant, entry_slug: str) -> None:
     delete+re-add indefinitely.
     """
     await _store(hass, entry_slug).async_remove()
+    await async_wipe_routes(hass, entry_slug)
 
 
 async def async_record_activities(
@@ -120,6 +124,13 @@ async def async_record_activities(
     for activity in new_activities:
         existing[activity.source_id] = activity
     await async_save_activities(hass, entry_slug, existing)
+    await async_record_routes(hass, entry_slug, new_activities)
+
+
+async def async_get_latest_activity(hass: HomeAssistant, entry_slug: str) -> Activity | None:
+    """Return the activity with the latest start in the persisted log, or None if empty."""
+    activities = await async_load_activities(hass, entry_slug)
+    return max(activities.values(), key=lambda a: a.start, default=None)
 
 
 async def async_get_activities_in_range(

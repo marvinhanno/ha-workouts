@@ -12,11 +12,12 @@ days show distance/duration but no calories.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import aiohttp
 from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.util import dt as dt_util
 
 from ..models import Activity, ActivityType, WorkoutData
 from .base import (
@@ -54,6 +55,30 @@ def _map_activity_type(strava_type: str | None) -> ActivityType:
     return _ACTIVITY_TYPE_MAP.get(strava_type.lower(), ActivityType.OTHER)
 
 
+def _local_day_bounds(start_day: date, end_day: date) -> tuple[datetime, datetime]:
+    """[start of start_day, end of end_day] in HA's local timezone.
+
+    Strava's after/before filter on the activity's real (UTC) start instant,
+    so local midnight has to be converted explicitly — UTC midnight would
+    drop activities started between local midnight and the UTC offset
+    (00:00-02:00 in CEST) from "today".
+    """
+    start = dt_util.start_of_local_day(start_day)
+    end = dt_util.start_of_local_day(end_day + timedelta(days=1)) - timedelta(seconds=1)
+    return start, end
+
+
+def _parse_local_start(value: str) -> datetime:
+    """Parse Strava's start_date_local into a NAIVE local wall-clock datetime.
+
+    Strava suffixes this local time with a misleading "Z". Treating it as UTC
+    made calendar.py's dt_util.as_local() shift every event by the UTC
+    offset; naive matches what the other sources store (see
+    sources/garmin.py's _parse_garmin_datetime).
+    """
+    return datetime.fromisoformat(value.removesuffix("Z"))
+
+
 class StravaSource(WorkoutSource):
     """Fetches activity data from Strava via its OAuth2 REST API."""
 
@@ -73,9 +98,7 @@ class StravaSource(WorkoutSource):
         await self._request("GET", "/athlete")
 
     async def async_fetch(self, target_day: date) -> WorkoutData:
-        start = datetime.combine(target_day, datetime.min.time(), tzinfo=timezone.utc)
-        end = datetime.combine(target_day, datetime.max.time(), tzinfo=timezone.utc)
-        summaries = await self._list_activities(start, end)
+        summaries = await self._list_activities(*_local_day_bounds(target_day, target_day))
 
         activities = []
         for summary in summaries:
@@ -88,9 +111,7 @@ class StravaSource(WorkoutSource):
         self, start_day: date, end_day: date
     ) -> list[Activity]:
         """Fetch all activities in the range. No calorie detail calls (see module docstring)."""
-        start = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
-        end = datetime.combine(end_day, datetime.max.time(), tzinfo=timezone.utc)
-        summaries = await self._list_activities(start, end)
+        summaries = await self._list_activities(*_local_day_bounds(start_day, end_day))
         return [self._parse_activity(summary, calories=None) for summary in summaries]
 
     async def _list_activities(
@@ -145,7 +166,7 @@ class StravaSource(WorkoutSource):
             source=self.key,
             source_id=str(item["id"]),
             activity_type=_map_activity_type(item.get("sport_type") or item.get("type")),
-            start=datetime.fromisoformat(item["start_date_local"].replace("Z", "+00:00")),
+            start=_parse_local_start(item["start_date_local"]),
             duration_seconds=float(item.get("moving_time") or 0),
             distance_meters=item.get("distance"),
             calories=calories,
@@ -157,6 +178,7 @@ class StravaSource(WorkoutSource):
             ),
             elevation_gain_meters=item.get("total_elevation_gain"),
             name=item.get("name"),
+            summary_polyline=(item.get("map") or {}).get("summary_polyline") or None,
         )
 
     @classmethod

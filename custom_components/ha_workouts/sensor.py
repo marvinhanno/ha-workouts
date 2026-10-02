@@ -22,7 +22,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .activity_log import async_backfill_activity_splits
+from .activity_log import async_backfill_activity_splits, async_get_latest_activity
 from .backfill_progress import BackfillProgress
 from .const import (
     CONF_BACKFILL_DAYS,
@@ -39,6 +39,7 @@ from .const import (
 from .coordinator import WorkoutDataUpdateCoordinator
 from .models import Activity, ActivityType, WorkoutData
 from .period_sensors import PeriodTotals, async_get_period_totals
+from .routes import async_get_route
 from .statistics_import import (
     DISTANCE_ACTIVITY_TYPES,
     async_apply_activity_deltas,
@@ -460,6 +461,7 @@ async def async_setup_entry(
         )
     )
     entities.append(LastUpdatedSensor(coordinator, entry))
+    entities.append(LatestActivitySensor(coordinator, entry, entry_slug))
     if source_type == SOURCE_GARMIN:
         entities.append(
             BackfillStatusSensor(
@@ -976,6 +978,89 @@ class LastUpdatedSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorE
     @property
     def native_value(self) -> object | None:
         return self.coordinator.last_data_update
+
+
+class LatestActivitySensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorEntity):
+    """The most recent activity in the persisted log, including its route.
+
+    Unlike the last_activity_* sensors, which only see the current poll (i.e.
+    today's activities, so they go unknown at midnight), this reads
+    activity_log.py and keeps showing the latest activity however old it is.
+    State is its start time; details and the encoded route polyline (see
+    routes.py) are attributes. The polyline is excluded from the recorder —
+    it can be several KB and would otherwise be stored on every state write.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "latest_activity"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _unrecorded_attributes = frozenset({"summary_polyline"})
+
+    def __init__(
+        self, coordinator: WorkoutDataUpdateCoordinator, entry: ConfigEntry, entry_slug: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_slug = entry_slug
+        self._attr_unique_id = f"{entry.entry_id}_latest_activity"
+        self.entity_id = f"sensor.{entry_slug}_latest_activity"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer=coordinator.source.key.capitalize(),
+        )
+        self._activity: Activity | None = None
+        self._route: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        await self._async_refresh()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.hass.async_create_task(self._async_refresh())
+        super()._handle_coordinator_update()
+
+    async def _async_refresh(self) -> None:
+        self._activity = await async_get_latest_activity(self.hass, self._entry_slug)
+        self._route = (
+            await async_get_route(self.hass, self._entry_slug, self._activity.source_id)
+            if self._activity
+            else None
+        )
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> object | None:
+        if self._activity is None:
+            return None
+        # Activity.start is local wall-clock time (naive for Garmin/Strava);
+        # as_local attaches the local timezone a TIMESTAMP sensor requires.
+        return dt_util.as_local(self._activity.start)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        activity = self._activity
+        if activity is None:
+            return {}
+        distance_km = round(activity.distance_meters / 1000, 2) if activity.distance_meters else None
+        pace = (
+            _format_pace(activity.duration_seconds / distance_km)
+            if distance_km and activity.duration_seconds
+            else None
+        )
+        return {
+            "name": activity.name,
+            "activity_type": activity.activity_type.value,
+            "distance_km": distance_km,
+            "duration_minutes": _activity_duration_minutes(activity),
+            "pace": pace,
+            "avg_heart_rate": activity.avg_heart_rate,
+            "max_heart_rate": activity.max_heart_rate,
+            "elevation_gain_m": activity.elevation_gain_meters,
+            "calories": activity.calories,
+            "source_id": activity.source_id,
+            "summary_polyline": self._route,
+        }
 
 
 class CorosMcpDebugLogSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorEntity):

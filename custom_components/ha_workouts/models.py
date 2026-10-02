@@ -62,6 +62,11 @@ class Activity:
     #: None means "not fetched/not available" — distinct from an empty list,
     #: which would mean "fetched, but the activity genuinely had no laps".
     splits: list[ActivitySplit] | None = None
+    #: Google-encoded polyline of the route (Strava's map.summary_polyline);
+    #: None for indoor activities and sources without route data. Persisted
+    #: in its own store (see routes.py), not in the activity log, so the
+    #: period sensors that re-read the log on every poll stay cheap.
+    summary_polyline: str | None = None
 
 
 @dataclass(slots=True)

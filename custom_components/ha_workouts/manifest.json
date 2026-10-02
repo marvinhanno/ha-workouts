@@ -4,9 +4,9 @@
   "codeowners": ["@mrvautin"],
   "config_flow": true,
   "dependencies": ["application_credentials", "recorder"],
-  "documentation": "https://github.com/mrvautin/ha-workouts",
+  "documentation": "https://github.com/marvinhanno/ha-workouts",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/mrvautin/ha-workouts/issues",
+  "issue_tracker": "https://github.com/marvinhanno/ha-workouts/issues",
   "requirements": ["garminconnect==0.2.24"],
-  "version": "0.7.0"
+  "version": "0.7.0-fork.1"
 }
