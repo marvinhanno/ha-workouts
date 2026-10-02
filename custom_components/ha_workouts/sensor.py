@@ -860,11 +860,7 @@ class BackfillStatusSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], Sens
         # progress updates independently of the coordinator's own refresh
         # cycle (it's mutated from the background backfill task), so push a
         # state write from there directly rather than polling for changes.
-        self._progress.on_change = self._handle_progress_change
-
-    async def async_will_remove_from_hass(self) -> None:
-        self._progress.on_change = None
-        await super().async_will_remove_from_hass()
+        self.async_on_remove(self._progress.add_listener(self._handle_progress_change))
 
     @callback
     def _handle_progress_change(self) -> None:
@@ -931,12 +927,8 @@ class HistoryStartSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], Sensor
         # The persisted value only changes when the backfill's early-stop
         # fires, which is signalled the same way BackfillStatusSensor learns
         # of progress — piggyback on that rather than polling.
-        self._progress.on_change = self._handle_progress_change
+        self.async_on_remove(self._progress.add_listener(self._handle_progress_change))
         await self._async_refresh_value()
-
-    async def async_will_remove_from_hass(self) -> None:
-        self._progress.on_change = None
-        await super().async_will_remove_from_hass()
 
     @callback
     def _handle_progress_change(self) -> None:

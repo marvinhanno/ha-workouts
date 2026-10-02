@@ -54,6 +54,16 @@ class WorkoutSource(ABC):
     ) -> list[Activity]:
         """Fetch all activities between start_day and end_day (inclusive). Used for backfill."""
 
+    async def async_latest_activity_day_before(self, day: date) -> date | None:
+        """Start day of the most recent activity before `day`, or None if there is none.
+
+        Lets the history backfill jump over long breaks instead of stopping
+        after a few empty chunks. Sources without a cheap way to answer this
+        keep the default, which makes the backfill fall back to that
+        early-stop heuristic.
+        """
+        raise NotImplementedError
+
     @classmethod
     @abstractmethod
     def config_schema_fields(cls) -> dict[str, Any]:

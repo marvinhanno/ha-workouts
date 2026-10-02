@@ -76,7 +76,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta, timezone
+from typing import TypeVar
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
@@ -104,6 +106,8 @@ from .models import Activity, ActivityType
 from .sources.base import WorkoutSource, WorkoutSourceRateLimitedError
 
 _LOGGER = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 #: Activity types that get a distance sensor in addition to duration/calories.
 DISTANCE_ACTIVITY_TYPES = {
@@ -333,9 +337,23 @@ async def async_backfill_activity_statistics(
     # start from whichever is later: the requested depth, or the previously
     # discovered real boundary. Only relevant for "All available history";
     # for a fixed depth start_day is already bounded and this is a no-op.
+    #
+    # Sources that can look up their next-older activity (see
+    # WorkoutSource.async_latest_activity_day_before) re-check that boundary
+    # with one request: a boundary cached by the old 3-empty-chunks heuristic
+    # can be wrong if the account simply had a long break.
     cached_earliest = await async_get_earliest_known_activity_day(hass, entry_slug)
     if cached_earliest is not None and cached_earliest > start_day:
-        start_day = cached_earliest
+        older = await _latest_activity_day_before(source, cached_earliest, progress, request_lock)
+        if older is _UNSUPPORTED or older is None:
+            start_day = cached_earliest
+        else:
+            _LOGGER.info(
+                "Cached history start %s for %s is stale (found an activity on %s); re-scanning",
+                cached_earliest,
+                entry_slug,
+                older,
+            )
 
     progress.state = "running"
     progress.target_day = start_day
@@ -394,11 +412,38 @@ async def async_backfill_activity_statistics(
                 progress.days_imported_this_run,
             )
 
+            next_chunk_end = chunk_start - timedelta(days=1)
             if activities:
                 consecutive_empty_chunks = 0
             else:
                 consecutive_empty_chunks += 1
-                if consecutive_empty_chunks >= _CONSECUTIVE_EMPTY_CHUNKS_TO_STOP:
+                older = await _latest_activity_day_before(
+                    source, chunk_start, progress, request_lock
+                )
+                if older is None:
+                    _LOGGER.debug(
+                        "%s has no activities before %s; backfill reached the start",
+                        entry_slug,
+                        chunk_start,
+                    )
+                    await async_set_earliest_known_activity_day(
+                        hass, entry_slug, earliest_day_reached
+                    )
+                    break
+                if older is not _UNSUPPORTED:
+                    # Jump straight over the gap instead of walking it chunk by
+                    # chunk (and instead of the early-stop heuristic below,
+                    # which gives up on accounts with a break of 270+ days).
+                    consecutive_empty_chunks = 0
+                    next_chunk_end = min(next_chunk_end, older)
+                    _LOGGER.debug(
+                        "No activities %s to %s for %s; next older one on %s",
+                        chunk_start,
+                        chunk_end,
+                        entry_slug,
+                        older,
+                    )
+                elif consecutive_empty_chunks >= _CONSECUTIVE_EMPTY_CHUNKS_TO_STOP:
                     # For a fixed depth (backfill_days != 0) this can't
                     # trigger meaningfully early — start_day is already a
                     # bounded, user-chosen window — but for "All available
@@ -421,7 +466,7 @@ async def async_backfill_activity_statistics(
                     )
                     break
 
-            chunk_end = chunk_start - timedelta(days=1)
+            chunk_end = next_chunk_end
             if chunk_end >= start_day:
                 await asyncio.sleep(source.backfill_chunk_pause_seconds)
 
@@ -465,6 +510,26 @@ async def async_backfill_activity_statistics(
         progress.notify()
 
 
+#: Returned by _latest_activity_day_before for sources that can't answer it.
+_UNSUPPORTED = object()
+
+
+async def _latest_activity_day_before(
+    source: WorkoutSource, day: date, progress: BackfillProgress, request_lock: asyncio.Lock
+) -> date | None | object:
+    """source.async_latest_activity_day_before(day) with rate-limit backoff, or
+    _UNSUPPORTED if the source doesn't implement it."""
+    try:
+        return await _with_backoff(
+            lambda: source.async_latest_activity_day_before(day),
+            f"lookup before {day}",
+            progress,
+            request_lock,
+        )
+    except NotImplementedError:
+        return _UNSUPPORTED
+
+
 async def _fetch_chunk_with_backoff(
     source: WorkoutSource,
     chunk_start: date,
@@ -472,7 +537,22 @@ async def _fetch_chunk_with_backoff(
     progress: BackfillProgress,
     request_lock: asyncio.Lock,
 ) -> list[Activity]:
-    """Fetch one date-range chunk, retrying with increasing delays on rate limiting.
+    """Fetch one date-range chunk, retrying with increasing delays on rate limiting."""
+    return await _with_backoff(
+        lambda: source.async_fetch_activities_range(chunk_start, chunk_end),
+        f"{chunk_start} to {chunk_end}",
+        progress,
+        request_lock,
+    )
+
+
+async def _with_backoff(
+    request: Callable[[], Awaitable[_T]],
+    description: str,
+    progress: BackfillProgress,
+    request_lock: asyncio.Lock,
+) -> _T:
+    """Run one source request, retrying with increasing delays on rate limiting.
 
     Neither Garmin's unofficial API nor Strava's documents a reliable retry-after
     for this case; the fixed delays here are a conservative guess. Any other error
@@ -489,10 +569,9 @@ async def _fetch_chunk_with_backoff(
             progress.notify()
             _LOGGER.warning(
                 "Source rate-limited the backfill; waiting %ds before retrying "
-                "%s to %s (attempt %d)",
+                "%s (attempt %d)",
                 delay,
-                chunk_start,
-                chunk_end,
+                description,
                 attempt + 1,
             )
             await asyncio.sleep(delay)
@@ -501,12 +580,12 @@ async def _fetch_chunk_with_backoff(
 
         try:
             async with request_lock:
-                return await source.async_fetch_activities_range(chunk_start, chunk_end)
+                return await request()
         except WorkoutSourceRateLimitedError:
             if attempt == len(_RATE_LIMIT_RETRY_DELAYS):
                 raise
 
-    return []  # unreachable, satisfies type checking
+    raise AssertionError("unreachable")
 
 
 async def _range_fully_covered(

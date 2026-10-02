@@ -2,7 +2,7 @@
 
 > **This is a fork of [mrvautin/ha-workouts](https://github.com/mrvautin/ha-workouts).**
 > It tracks upstream; upstream changes are reviewed before they are merged here.
-> Differences to the original (all Strava-side, other sources unchanged):
+> Differences to the original (Strava-side unless noted):
 >
 > - **Route polylines:** Strava's `map.summary_polyline` (already part of the activity
 >   list response — no extra API calls) is stored per activity in its own store
@@ -18,6 +18,17 @@
 > - **Correct Strava start times:** `start_date_local` is parsed as naive local time
 >   (like Garmin) instead of UTC, so calendar events are no longer shifted by the
 >   UTC offset.
+> - **History backfill skips long breaks (Strava):** when a 90-day chunk is empty, one
+>   request (`before=…&per_page=1`) asks Strava for the next older activity and the backfill
+>   jumps there. Upstream stops after 3 empty chunks (270 days) and caches that boundary, so
+>   older history behind a long break was never imported. A cached boundary is re-checked
+>   with one request on startup. Sources without this lookup keep upstream's behaviour.
+> - **E-bike rides count as cycling** (`EBikeRide`, `EMountainBikeRide`).
+> - **Import status sensor updates live:** backfill progress supports several listeners
+>   (upstream's single `on_change` slot was overwritten by the history start sensor, so
+>   the status stayed `idle`).
+> - **Tests** in `tests/` (`uv run --with pytest-homeassistant-custom-component --with
+>   garminconnect==0.2.24 pytest`).
 >
 > Install via HACS as a custom repository: `marvinhanno/ha-workouts` (category: Integration).
 

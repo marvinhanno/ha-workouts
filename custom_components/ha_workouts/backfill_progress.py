@@ -23,9 +23,12 @@ class BackfillProgress:
     activity/statistics backfill (statistics_import.async_backfill_activity_statistics)
     and the opt-in splits backfill (activity_log.async_backfill_activity_splits).
 
-    on_change is set by the status sensor to a HA @callback (async_write_ha_state)
-    so it can push updates to itself the moment progress changes, instead of polling.
-    Must only be invoked from the event loop, same as the rest of this module.
+    Sensors register a HA @callback via add_listener so they can push updates
+    to themselves the moment progress changes, instead of polling. A list,
+    not a single slot: the import status sensor and the history start sensor
+    both listen to the same progress, and a single slot let the second one
+    silently replace the first (status stuck on "idle"). Must only be invoked
+    from the event loop, same as the rest of this module.
     """
 
     state: str = "idle"  # idle | running | backing_off | complete | error
@@ -33,8 +36,13 @@ class BackfillProgress:
     target_day: date | None = None
     days_imported_this_run: int = 0
     error: str | None = None
-    on_change: Callable[[], None] | None = field(default=None, compare=False)
+    _listeners: list[Callable[[], None]] = field(default_factory=list, compare=False)
+
+    def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Register listener; returns a function that removes it again."""
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener)
 
     def notify(self) -> None:
-        if self.on_change is not None:
-            self.on_change()
+        for listener in list(self._listeners):
+            listener()

@@ -37,6 +37,8 @@ _ACTIVITY_TYPE_MAP: dict[str, ActivityType] = {
     "trailrun": ActivityType.RUNNING,
     "treadmill": ActivityType.RUNNING,
     "ride": ActivityType.CYCLING,
+    "ebikeride": ActivityType.CYCLING,
+    "emountainbikeride": ActivityType.CYCLING,
     "mountainbikeride": ActivityType.CYCLING,
     "gravelride": ActivityType.CYCLING,
     "virtualride": ActivityType.CYCLING,
@@ -113,6 +115,18 @@ class StravaSource(WorkoutSource):
         """Fetch all activities in the range. No calorie detail calls (see module docstring)."""
         summaries = await self._list_activities(*_local_day_bounds(start_day, end_day))
         return [self._parse_activity(summary, calories=None) for summary in summaries]
+
+    async def async_latest_activity_day_before(self, day: date) -> date | None:
+        # One request: with only `before` set, Strava lists newest first.
+        before, _ = _local_day_bounds(day, day)
+        batch = await self._request(
+            "GET",
+            "/athlete/activities",
+            params={"before": int(before.timestamp()), "per_page": 1},
+        )
+        if not batch:
+            return None
+        return _parse_local_start(batch[0]["start_date_local"]).date()
 
     async def _list_activities(
         self, start: datetime, end: datetime
