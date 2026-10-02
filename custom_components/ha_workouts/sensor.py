@@ -19,10 +19,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .activity_log import async_backfill_activity_splits, async_get_latest_activity
+from .activity_log import (
+    async_backfill_activity_splits,
+    async_get_latest_activity,
+    async_load_activities,
+)
 from .backfill_progress import BackfillProgress
 from .const import (
     CONF_BACKFILL_DAYS,
@@ -40,6 +45,7 @@ from .coordinator import WorkoutDataUpdateCoordinator
 from .models import Activity, ActivityType, WorkoutData
 from .period_sensors import PeriodTotals, async_get_period_totals
 from .routes import async_get_route
+from .stats import compute_stats
 from .statistics_import import (
     DISTANCE_ACTIVITY_TYPES,
     async_apply_activity_deltas,
@@ -462,6 +468,7 @@ async def async_setup_entry(
     )
     entities.append(LastUpdatedSensor(coordinator, entry))
     entities.append(LatestActivitySensor(coordinator, entry, entry_slug))
+    entities.append(StatsSensor(coordinator, entry, entry_slug))
     if source_type == SOURCE_GARMIN:
         entities.append(
             BackfillStatusSensor(
@@ -1053,6 +1060,89 @@ class LatestActivitySensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], Sens
             "source_id": activity.source_id,
             "summary_polyline": self._route,
         }
+
+
+class StatsSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorEntity):
+    """Aggregated statistics computed locally from the persisted activity log.
+
+    State = number of activities in the current week (week start per the
+    week_start_day option). The attributes (see stats.py) hold week/year
+    totals, last 12 months, calendar days, streaks, personal bests and a
+    comparison for the latest activity. No API calls: everything is derived
+    from activity_log.py on each coordinator update and again just after
+    midnight, so the week rolls over on time. The attributes are large and
+    only change meaningfully with new activities, so none are recorded.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "stats"
+    _unrecorded_attributes = frozenset(
+        {
+            "woche_start",
+            "woche",
+            "vorwoche",
+            "jahr",
+            "vorjahr_bis_heute",
+            "monate",
+            "tage",
+            "serie_wochen",
+            "serie_laufwochen",
+            "bestwerte",
+            "letzte",
+        }
+    )
+
+    def __init__(
+        self, coordinator: WorkoutDataUpdateCoordinator, entry: ConfigEntry, entry_slug: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_slug = entry_slug
+        self._attr_unique_id = f"{entry.entry_id}_stats"
+        self.entity_id = f"sensor.{entry_slug}_stats"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer=coordinator.source.key.capitalize(),
+        )
+        self._stats: dict | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_time_change(
+                self.hass,
+                lambda _now: self.hass.async_create_task(self._async_refresh()),
+                hour=0,
+                minute=0,
+                second=5,
+            )
+        )
+        await self._async_refresh()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.hass.async_create_task(self._async_refresh())
+        super()._handle_coordinator_update()
+
+    async def _async_refresh(self) -> None:
+        activities = await async_load_activities(self.hass, self._entry_slug)
+        week_start_day = self.coordinator.entry.options.get(
+            CONF_WEEK_START_DAY, DEFAULT_WEEK_START_DAY
+        )
+        self._stats = compute_stats(
+            list(activities.values()), dt_util.now().date(), week_start_day
+        )
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int | None:
+        if self._stats is None:
+            return None
+        return self._stats["woche"]["gesamt"]["n"]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return dict(self._stats) if self._stats else {}
 
 
 class CorosMcpDebugLogSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorEntity):

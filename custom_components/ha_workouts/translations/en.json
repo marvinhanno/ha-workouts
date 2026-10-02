@@ -188,6 +188,9 @@
       "latest_activity": {
         "name": "Latest activity"
       },
+      "stats": {
+        "name": "Stats"
+      },
       "history_start": {
         "name": "History start date"
       },

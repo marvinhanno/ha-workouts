@@ -27,6 +27,12 @@
 > - **Import status sensor updates live:** backfill progress supports several listeners
 >   (upstream's single `on_change` slot was overwritten by the history start sensor, so
 >   the status stayed `idle`).
+> - **New sensor `sensor.<source>_stats`:** statistics computed locally from the persisted
+>   activity log (no API calls, see `stats.py`). State = activities in the current week;
+>   attributes (not recorded): week / last week / year / same period last year totals per type,
+>   last 12 months, calendar days of the last 26 weeks, week streaks, personal bests and a
+>   comparison of the latest activity with the average of the previous ones. Refreshed after
+>   every poll and shortly after midnight.
 > - **Tests** in `tests/` (`uv run --with pytest-homeassistant-custom-component --with
 >   garminconnect==0.2.24 pytest`).
 >
