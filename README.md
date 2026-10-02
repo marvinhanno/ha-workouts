@@ -32,9 +32,9 @@
 >   attributes (not recorded): week / last week / year / same period last year totals per type,
 >   last 12 months, calendar days of the last 26 weeks, week streaks, personal bests and a
 >   comparison of the latest activity with the average of the previous ones. Refreshed after
->   every poll and shortly after midnight.
-> - **Tests** in `tests/` (`uv run --with pytest-homeassistant-custom-component --with
->   garminconnect==0.2.24 pytest`).
+>   every poll and at 00:00:05, so the week rolls over on time.
+> - **Tests** in `tests/` (`uv run --no-project --python 3.13 --with
+>   pytest-homeassistant-custom-component --with garminconnect==0.2.24 pytest`).
 >
 > Install via HACS as a custom repository: `marvinhanno/ha-workouts` (category: Integration).
 

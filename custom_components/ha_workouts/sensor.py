@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import get_last_statistics
@@ -1110,13 +1110,14 @@ class StatsSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorEntity)
         await super().async_added_to_hass()
         self.async_on_remove(
             async_track_time_change(
-                self.hass,
-                lambda _now: self.hass.async_create_task(self._async_refresh()),
-                hour=0,
-                minute=0,
-                second=5,
+                self.hass, self._async_midnight_refresh, hour=0, minute=0, second=5
             )
         )
+        await self._async_refresh()
+
+    async def _async_midnight_refresh(self, _now: datetime) -> None:
+        # A coroutine function so HA runs it on the event loop (a plain lambda
+        # would be sent to the executor, where async_create_task is not allowed).
         await self._async_refresh()
 
     @callback
