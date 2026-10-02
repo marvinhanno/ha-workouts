@@ -126,9 +126,9 @@ def test_latest_without_distance_uses_duration():
 
 def test_cycling_compares_in_kmh():
     items = [act(f"2026-09-{d:02d}", ActivityType.CYCLING, km=20, minutes=60) for d in (1, 3, 5)]
-    items.append(act("2026-10-01", ActivityType.CYCLING, km=25, minutes=60))
+    items.append(act("2026-10-01", ActivityType.CYCLING, km=25.3, minutes=60))
     la = compute_stats(items, date(2026, 10, 2), 0)["letzte"]
-    assert la["schnitt10"] == 20.0 and la["diff"] == 5
+    assert la["schnitt10"] == 20.0 and la["diff"] == 5.3
 
 
 def test_months_and_days_series():

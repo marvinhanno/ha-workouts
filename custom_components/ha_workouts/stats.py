@@ -217,8 +217,13 @@ def _latest(activities: list[Activity], week_start_day: int, holders: dict[str, 
         average = _compare_value(type_, sorted(previous, key=lambda a: a.start)[-COMPARE_COUNT:])
         if average is not None:
             result["schnitt10"] = round(average, 2)
-            seconds_unit = type_ in PACE_TYPES or type_ == ActivityType.SWIMMING
-            result["diff"] = round((mine - average) * (60 if seconds_unit else 1))
+            delta = mine - average
+            if type_ in PACE_TYPES or type_ == ActivityType.SWIMMING:
+                result["diff"] = round(delta * 60)  # seconds per km / per 100 m
+            elif type_ == ActivityType.CYCLING:
+                result["diff"] = round(delta, 1)  # km/h
+            else:
+                result["diff"] = round(delta)  # minutes
     if len(same_type) >= MIN_HISTORY:
         for key, holder in holders.items():
             if holder.source_id == latest.source_id:
