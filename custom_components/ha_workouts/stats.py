@@ -1,5 +1,6 @@
 """Aggregated statistics over the persisted activity log (week, year, months,
-calendar days, streaks, personal bests, comparison for the latest activity).
+calendar days, recent activities, streaks, personal bests, comparison for the
+latest activity).
 
 Pure functions on a list of Activity records — no API calls and no recorder
 access, so the stats sensor (sensor.py's StatsSensor) can recompute everything
@@ -16,6 +17,8 @@ from .statistics_import import DISTANCE_ACTIVITY_TYPES
 
 #: Weeks shown in the "days" calendar (including the current one).
 CALENDAR_WEEKS = 26
+#: Weeks of single activities in the "list" (including the current one).
+LIST_WEEKS = 10
 #: Months in the "months" series (including the current one).
 MONTHS = 12
 #: Minimum earlier activities of the same type before the latest one is
@@ -125,6 +128,20 @@ def _calendar_days(activities: list[Activity], today: date, week_start_day: int)
         longest = max(items, key=_minutes)
         days.append([day.isoformat(), longest.activity_type.value, round(sum(_minutes(a) for a in items))])
     return days
+
+
+def _activity_list(activities: list[Activity], today: date, week_start_day: int) -> list[list]:
+    """Every activity of the last LIST_WEEKS weeks, oldest first:
+    [local start "YYYY-MM-DDTHH:MM", type, minutes, source_id].
+
+    Unlike the calendar days (one entry per day, longest type wins) nothing is
+    merged here, so a short run next to a long walk on the same day still counts.
+    """
+    first = week_start(today, week_start_day) - timedelta(weeks=LIST_WEEKS - 1)
+    return [
+        [a.start.strftime("%Y-%m-%dT%H:%M"), a.activity_type.value, round(_minutes(a)), a.source_id]
+        for a in _in_range(activities, first, today)
+    ]
 
 
 def _pace(activity: Activity) -> float | None:
@@ -258,6 +275,7 @@ def compute_stats(activities: list[Activity], today: date, week_start_day: int) 
         ),
         "monate": _month_series(activities, today),
         "tage": _calendar_days(activities, today, week_start_day),
+        "liste": _activity_list(activities, today, week_start_day),
         "serie_wochen": _streak(week_starts, this_week),
         "serie_laufwochen": _streak(run_week_starts, this_week),
         "bestwerte": {key: _best_entry(key, holder) for key, holder in holders.items()},

@@ -30,7 +30,8 @@
 > - **New sensor `sensor.<source>_stats`:** statistics computed locally from the persisted
 >   activity log (no API calls, see `stats.py`). State = activities in the current week;
 >   attributes (not recorded): week / last week / year / same period last year totals per type,
->   last 12 months, calendar days of the last 26 weeks, week streaks, personal bests and a
+>   last 12 months, calendar days of the last 26 weeks, every single activity of the last
+>   10 weeks (`liste`: start, type, minutes, source id), week streaks, personal bests and a
 >   comparison of the latest activity with the average of the previous ones. Refreshed after
 >   every poll and at 00:00:05, so the week rolls over on time.
 > - **Tests** in `tests/` (`uv run --no-project --python 3.13 --with

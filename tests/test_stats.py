@@ -145,3 +145,22 @@ def test_months_and_days_series():
     assert months[-1]["km"] == {"running": 3.0, "walking": 2.0}
     # 26 weeks back from the week of 2026-09-28 is 2026-04-06: older days are left out
     assert st["tage"] == [["2026-10-01", "walking", 60]]
+
+
+def test_activity_list_keeps_every_activity():
+    items = [
+        act("2026-07-26", km=5),  # 10 weeks back from the week of 2026-09-28 is 2026-07-27 -> excluded
+        act("2026-07-27", km=5, minutes=35.4),
+        act("2026-10-01", ActivityType.WALKING, km=4, minutes=60, hour=9),
+        act("2026-10-01", km=5, minutes=37, hour=11),  # shorter than the walk: hidden in "tage"
+        act("2026-10-01", ActivityType.STRENGTH_TRAINING, km=None, minutes=14.6, hour=18),
+    ]
+    st = compute_stats(items, date(2026, 10, 2), 0)
+    assert [row[:3] for row in st["liste"]] == [
+        ["2026-07-27T08:00", "running", 35],
+        ["2026-10-01T09:00", "walking", 60],
+        ["2026-10-01T11:00", "running", 37],
+        ["2026-10-01T18:00", "strength_training", 15],
+    ]
+    assert st["liste"][-1][3] == items[-1].source_id
+    assert st["tage"][-1] == ["2026-10-01", "walking", 112]

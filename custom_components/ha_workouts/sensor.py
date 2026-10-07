@@ -1085,6 +1085,7 @@ class StatsSensor(CoordinatorEntity[WorkoutDataUpdateCoordinator], SensorEntity)
             "vorjahr_bis_heute",
             "monate",
             "tage",
+            "liste",
             "serie_wochen",
             "serie_laufwochen",
             "bestwerte",
